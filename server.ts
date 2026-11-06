@@ -339,8 +339,16 @@ async function startServer() {
     try {
       const prompt = `Analyseer dit MKB-bedrijf en genereer de 10-Seconden Diagnose & 1-Pagina OGSM in het Nederlands:
 Bedrijfsnaam: ${intake.companyName}
+Naam DGA / Directeur: ${intake.dgaName}
 Branche: ${intake.industry}
 Aantal FTE: ${intake.fte}
+Huidige Jaaromzet: € ${intake.currentRevenueMillions} miljoen (Doelomzet over 3 jaar: € ${intake.targetRevenueMillions} miljoen)
+Huidige EBITDA: ${intake.currentEbitdaPercent}% (Doel-EBITDA: ${intake.targetEbitdaPercent}%)
+Huidige Faalkosten / Margelek: ${intake.failureCostPercent}% van de omzet
+Minimale Brutomarge-Slot Norm: ${intake.minGrossMarginPercent}%
+DGA Werkweek nu: ${intake.currentDgaHoursPerWeek} uur/week (Doel: ${intake.targetDgaHoursPerWeek} uur/week)
+DGA houdt nu nog offertes vast boven: € ${intake.currentApprovalThresholdEuro} (Nieuw gewenst MT-mandaat tot: € ${intake.newMtMandateThresholdEuro})
+Kernknelpunt op de vloer: ${intake.coreBottleneckSummary}
 Ruwe Gespreksnotities:
 ${intake.rawNotes}`;
 

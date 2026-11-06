@@ -9,6 +9,8 @@ import {
   Module1Output,
   Module2Output,
   Module3Output,
+  SavedClientCase,
+  EMPTY_INTAKE_CASE,
   DEMO_CASE_JANSEN,
   buildFallbackModule1,
   buildFallbackModule2,
@@ -24,6 +26,35 @@ import { Printer, AlertCircle } from 'lucide-react';
 
 type ActiveTab = 'tab1' | 'tab2' | 'tab3' | 'tab4';
 
+const STORAGE_KEY_CASES = 'boardroom_os_saved_cases_v1';
+
+function loadInitialSavedCases(): SavedClientCase[] {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY_CASES);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        return parsed;
+      }
+    }
+  } catch {
+    // ignore storage errors
+  }
+  const m1 = buildFallbackModule1(DEMO_CASE_JANSEN);
+  const m2 = buildFallbackModule2(DEMO_CASE_JANSEN, m1);
+  const m3 = buildFallbackModule3(DEMO_CASE_JANSEN, m1, m2);
+  return [
+    {
+      id: DEMO_CASE_JANSEN.id || 'case-jansen-klimaat',
+      updatedAt: new Date().toISOString(),
+      intake: { ...DEMO_CASE_JANSEN },
+      module1: m1,
+      module2: m2,
+      module3: m3,
+    },
+  ];
+}
+
 export default function App() {
   const [activeTab, setActiveTab] = useState<ActiveTab>(() => {
     const params = new URLSearchParams(window.location.search);
@@ -31,26 +62,33 @@ export default function App() {
   });
 
   const [mode, setMode] = useState<CockpitMode>('cockpit');
-  const [intake, setIntake] = useState<IntakeData>({
-    companyName: '',
-    industry: '',
-    fte: 65,
-    rawNotes: '',
+  const [savedCases, setSavedCases] = useState<SavedClientCase[]>(() =>
+    loadInitialSavedCases()
+  );
+
+  // Start with a clean, editable new case form by default (unless ?autostart=1)
+  const [intake, setIntake] = useState<IntakeData>(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('autostart') === '1') {
+      return { ...DEMO_CASE_JANSEN };
+    }
+    return { ...EMPTY_INTAKE_CASE, id: `case-${Date.now()}` };
   });
 
-  // Pre-seed modules with Jansen Klimaattechniek so any tab is immediately inspectable,
-  // and overwrite dynamically whenever the user runs Module 1 -> Module 2 -> Module 3.
   const [module1, setModule1] = useState<Module1Output>(() =>
-    buildFallbackModule1(DEMO_CASE_JANSEN)
+    buildFallbackModule1(intake.companyName ? intake : DEMO_CASE_JANSEN)
   );
   const [module2, setModule2] = useState<Module2Output>(() =>
-    buildFallbackModule2(DEMO_CASE_JANSEN, buildFallbackModule1(DEMO_CASE_JANSEN))
+    buildFallbackModule2(
+      intake.companyName ? intake : DEMO_CASE_JANSEN,
+      module1
+    )
   );
   const [module3, setModule3] = useState<Module3Output>(() =>
     buildFallbackModule3(
-      DEMO_CASE_JANSEN,
-      buildFallbackModule1(DEMO_CASE_JANSEN),
-      buildFallbackModule2(DEMO_CASE_JANSEN)
+      intake.companyName ? intake : DEMO_CASE_JANSEN,
+      module1,
+      module2
     )
   );
 
@@ -61,158 +99,150 @@ export default function App() {
   const [isOnePagerOpen, setIsOnePagerOpen] = useState(false);
 
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    if (params.get('autostart') === '1' && !intake.companyName) {
-      setIntake({ ...DEMO_CASE_JANSEN });
+    try {
+      localStorage.setItem(STORAGE_KEY_CASES, JSON.stringify(savedCases));
+    } catch {
+      // ignore storage errors
     }
-  }, [intake.companyName]);
+  }, [savedCases]);
 
   useEffect(() => {
     window.scrollTo({ top: 0, behavior: 'instant' as ScrollBehavior });
   }, [activeTab]);
 
+  const upsertSavedCase = (
+    intakeData: IntakeData,
+    m1: Module1Output,
+    m2: Module2Output,
+    m3: Module3Output
+  ) => {
+    const caseId = intakeData.id || `case-${Date.now()}`;
+    const updatedIntake = { ...intakeData, id: caseId };
+    setIntake(updatedIntake);
+
+    const entry: SavedClientCase = {
+      id: caseId,
+      updatedAt: new Date().toISOString(),
+      intake: updatedIntake,
+      module1: m1,
+      module2: m2,
+      module3: m3,
+    };
+
+    setSavedCases((prev) => {
+      const exists = prev.some((c) => c.id === caseId);
+      if (exists) {
+        return prev.map((c) => (c.id === caseId ? entry : c));
+      }
+      return [entry, ...prev];
+    });
+  };
+
+  const handleResetToNewCase = () => {
+    const fresh: IntakeData = {
+      ...EMPTY_INTAKE_CASE,
+      id: `case-${Date.now()}`,
+    };
+    setIntake(fresh);
+    setApiError(null);
+  };
+
+  const handleSelectSavedCase = (saved: SavedClientCase) => {
+    setIntake({ ...saved.intake });
+    setModule1(saved.module1);
+    setModule2(saved.module2);
+    setModule3(saved.module3);
+    setApiError(null);
+  };
+
+  const handleDeleteSavedCase = (id: string) => {
+    setSavedCases((prev) => prev.filter((c) => c.id !== id));
+  };
+
+  const handleSaveCurrentCase = () => {
+    const m1 = buildFallbackModule1(intake);
+    const m2 = buildFallbackModule2(intake, m1);
+    const m3 = buildFallbackModule3(intake, m1, m2);
+    setModule1(m1);
+    setModule2(m2);
+    setModule3(m3);
+    upsertSavedCase(intake, m1, m2, m3);
+  };
+
   const handleRunModule1 = async (intakeToRun: IntakeData) => {
-    setLoadingModule('m1');
     setApiError(null);
-    try {
-      const response = await fetch('/api/module1', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ intake: intakeToRun }),
-      });
 
-      const contentType = response.headers.get('content-type') || '';
-      if (!contentType.includes('application/json')) {
-        // Static hosting fallback (e.g. Netlify static deploy)
-        const m1Fallback = buildFallbackModule1(intakeToRun);
-        const m2Fallback = buildFallbackModule2(intakeToRun, m1Fallback);
-        const m3Fallback = buildFallbackModule3(
-          intakeToRun,
-          m1Fallback,
-          m2Fallback
-        );
-        setModule1(m1Fallback);
-        setModule2(m2Fallback);
-        setModule3(m3Fallback);
-        setActiveTab('tab2');
-        return;
-      }
+    // Immediately compute and display the diagnosis for all 3 modules from the user's exact variables
+    const localM1 = buildFallbackModule1(intakeToRun);
+    const localM2 = buildFallbackModule2(intakeToRun, localM1);
+    const localM3 = buildFallbackModule3(intakeToRun, localM1, localM2);
 
-      const json = await response.json();
-      if (!response.ok) {
-        throw new Error(json.error || 'Kon Module 1 niet genereren.');
-      }
-      const m1Data: Module1Output = json.data;
-      setModule1(m1Data);
-      setActiveTab('tab2');
+    setModule1(localM1);
+    setModule2(localM2);
+    setModule3(localM3);
+    upsertSavedCase(intakeToRun, localM1, localM2, localM3);
+    setActiveTab('tab2');
 
-      // Automatically feed Module 1 JSON into Module 2 in the background so it is ready
-      fetch('/api/module2', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ intake: intakeToRun, module1: m1Data }),
-      })
-        .then((r) => r.json())
-        .then((j2) => {
-          if (j2?.data) {
-            setModule2(j2.data);
-            return fetch('/api/module3', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                intake: intakeToRun,
-                module1: m1Data,
-                module2: j2.data,
-              }),
-            });
-          }
+    // Enrich asynchronously via server-side Gemini API if available
+    fetch('/api/module1', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ intake: intakeToRun }),
+    })
+      .then(async (response) => {
+        const contentType = response.headers.get('content-type') || '';
+        if (!response.ok || !contentType.includes('application/json')) {
           return null;
-        })
-        .then((r3) => (r3 ? r3.json() : null))
-        .then((j3) => {
-          if (j3?.data) {
-            setModule3(j3.data);
-          }
-        })
-        .catch(() => {
-          // Fallback already pre-populated
-        });
-    } catch {
-      const m1Fallback = buildFallbackModule1(intakeToRun);
-      const m2Fallback = buildFallbackModule2(intakeToRun, m1Fallback);
-      const m3Fallback = buildFallbackModule3(
-        intakeToRun,
-        m1Fallback,
-        m2Fallback
-      );
-      setModule1(m1Fallback);
-      setModule2(m2Fallback);
-      setModule3(m3Fallback);
-      setActiveTab('tab2');
-    } finally {
-      setLoadingModule(null);
-    }
-  };
-
-  const handleProceedToModule2 = async () => {
-    const effectiveIntake = intake.companyName ? intake : DEMO_CASE_JANSEN;
-    setLoadingModule('m2');
-    setApiError(null);
-    try {
-      const response = await fetch('/api/module2', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ intake: effectiveIntake, module1 }),
+        }
+        return response.json();
+      })
+      .then((json) => {
+        if (json?.data && json.source === 'gemini') {
+          setModule1(json.data);
+          upsertSavedCase(intakeToRun, json.data, localM2, localM3);
+        }
+      })
+      .catch(() => {
+        // Deterministic calculation already active
       });
-      const json = await response.json();
-      if (response.ok && json.data) {
-        setModule2(json.data);
-      }
-      setActiveTab('tab3');
-    } catch {
-      setActiveTab('tab3');
-    } finally {
-      setLoadingModule(null);
-    }
   };
 
-  const handleProceedToModule3 = async () => {
-    const effectiveIntake = intake.companyName ? intake : DEMO_CASE_JANSEN;
-    setLoadingModule('m3');
-    setApiError(null);
-    try {
-      const response = await fetch('/api/module3', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          intake: effectiveIntake,
-          module1,
-          module2,
-        }),
-      });
-      const json = await response.json();
-      if (response.ok && json.data) {
-        setModule3(json.data);
-      }
-      setActiveTab('tab4');
-    } catch {
-      setActiveTab('tab4');
-    } finally {
-      setLoadingModule(null);
-    }
+  const handleProceedToModule2 = () => {
+    setActiveTab('tab3');
   };
 
-  // Select current tab's 3 TL;DR bullets for the 10-Seconden Balk
+  const handleProceedToModule3 = () => {
+    setActiveTab('tab4');
+  };
+
+  // On Tab 1, live-calculate the 10-Seconden Balk directly from the current form variables!
+  const liveTab1Preview = buildFallbackModule1(intake);
+
   const getActiveTldrBullets = (): string[] => {
+    if (activeTab === 'tab1') return liveTab1Preview.tldr_3_bullets;
     if (activeTab === 'tab3') return module2.tldr_3_bullets;
     if (activeTab === 'tab4') return module3.tldr_3_bullets;
     return module1.tldr_3_bullets;
   };
 
+  const getActiveEuroLeak = (): string => {
+    if (activeTab === 'tab1') {
+      return liveTab1Preview.total_estimated_euro_leak_per_year;
+    }
+    return module1.total_estimated_euro_leak_per_year;
+  };
+
+  const getActiveDgaHours = (): string => {
+    if (activeTab === 'tab1') {
+      return liveTab1Preview.dga_hours_freed_per_week;
+    }
+    return module1.dga_hours_freed_per_week;
+  };
+
   const getActiveModuleTitle = (): string => {
     switch (activeTab) {
       case 'tab1':
-        return 'Tabblad 1 · Intake & 1-Klik Demo';
+        return 'Tabblad 1 · Nieuwe Case Opvoeren & Variabelen';
       case 'tab2':
         return 'Module 1 · Rode Vlaggen & 1-Pagina OGSM';
       case 'tab3':
@@ -223,7 +253,7 @@ export default function App() {
   };
 
   const displayCompanyName =
-    intake.companyName.trim() || DEMO_CASE_JANSEN.companyName;
+    intake.companyName.trim() || 'Nieuwe Klant-Case (Invoer)';
 
   return (
     <div className="min-h-screen bg-[#090D16] text-slate-100">
@@ -255,7 +285,7 @@ export default function App() {
                 : 'hover:text-white'
             }`}
           >
-            01. Intake &amp; Demo
+            01. Intake &amp; Cases
           </button>
           <button
             type="button"
@@ -310,8 +340,8 @@ export default function App() {
         {/* De "10-Seconden Balk" (TL;DR) bovenaan élk tabblad */}
         <TenSecondBar
           bullets={getActiveTldrBullets()}
-          euroLeakPerYear={module1.total_estimated_euro_leak_per_year}
-          dgaHoursFreedPerWeek={module1.dga_hours_freed_per_week}
+          euroLeakPerYear={getActiveEuroLeak()}
+          dgaHoursFreedPerWeek={getActiveDgaHours()}
           mode={mode}
           onModeChange={setMode}
           companyName={displayCompanyName}
@@ -334,6 +364,12 @@ export default function App() {
             intake={intake}
             onIntakeChange={setIntake}
             onStartDiagnosis={handleRunModule1}
+            onResetToNewCase={handleResetToNewCase}
+            savedCases={savedCases}
+            activeCaseId={intake.id}
+            onSelectSavedCase={handleSelectSavedCase}
+            onDeleteSavedCase={handleDeleteSavedCase}
+            onSaveCurrentCase={handleSaveCurrentCase}
             isLoading={loadingModule === 'm1'}
           />
         )}
