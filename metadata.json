@@ -1,0 +1,6 @@
+{
+  "name": "Boardroom OS — De 10-Seconden Directie Cockpit",
+  "description": "Goudvis-proof MKB-strategieconsultancy dashboard voor directe diagnose van margelekken, 1-pagina OGSM, BPMN proces-sloten en DGA-vrijheidskalender.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
